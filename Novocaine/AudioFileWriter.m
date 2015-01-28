@@ -125,14 +125,64 @@ static pthread_mutex_t outputAudioFileLock;
     UInt32 numIncomingBytes = thisNumFrames*thisNumChannels*sizeof(float);
     memcpy(self.outputBuffer, newData, numIncomingBytes);
     
+    AudioBufferList outgoingAudio = [self audioBufferListWithNewAudio:newData
+                                                            numFrames:thisNumFrames
+                                                          numChannels:thisNumChannels];
+    
+    if( 0 == pthread_mutex_trylock( &outputAudioFileLock ) ) 
+    {       
+        ExtAudioFileWriteAsync(self.outputFile, thisNumFrames, &outgoingAudio);
+    }
+    pthread_mutex_unlock( &outputAudioFileLock );
+    
+    // Figure out where we are in the file
+    SInt64 frameOffset = 0;
+    ExtAudioFileTell(self.outputFile, &frameOffset);
+    self.currentTime = (float)frameOffset / self.samplingRate;
+    
+}
+
+-(AudioBufferList)audioBufferListWithNewAudio:(float *)newData
+                                    numFrames:(UInt32)thisNumFrames
+                                  numChannels:(UInt32)thisNumChannels
+{
+    UInt32 numIncomingBytes = thisNumFrames*thisNumChannels*sizeof(float);
+    memcpy(self.outputBuffer, newData, numIncomingBytes);
+    
     AudioBufferList outgoingAudio;
     outgoingAudio.mNumberBuffers = 1;
     outgoingAudio.mBuffers[0].mNumberChannels = thisNumChannels;
     outgoingAudio.mBuffers[0].mDataByteSize = numIncomingBytes;
     outgoingAudio.mBuffers[0].mData = self.outputBuffer;
+    return outgoingAudio;
+}
+
+-(NSData*)dataWithNewAudio:(void*)newData
+                 numFrames:(UInt32)thisNumFrames
+{
+    UInt32 numIncomingBytes = thisNumFrames*self.numChannels*sizeof(float);
+    memcpy(self.outputBuffer, newData, numIncomingBytes);
     
-    if( 0 == pthread_mutex_trylock( &outputAudioFileLock ) ) 
-    {       
+    NSData * data = [NSData dataWithBytes:self.outputBuffer length:numIncomingBytes];
+    return data;
+}
+
+-(AudioBufferList)audioBufferListWithData:(NSData*)data
+{
+    AudioBufferList outgoingAudio;
+    outgoingAudio.mNumberBuffers = 1;
+    outgoingAudio.mBuffers[0].mNumberChannels = self.numChannels;
+    outgoingAudio.mBuffers[0].mDataByteSize = data.length;
+    outgoingAudio.mBuffers[0].mData = (void*)data.bytes;
+    return outgoingAudio;
+}
+
+- (void)writeNewAudioWithBufferList:(AudioBufferList)outgoingAudio
+                          numFrames:(UInt32)thisNumFrames
+                        numChannels:(UInt32)thisNumChannels
+{
+    if( 0 == pthread_mutex_trylock( &outputAudioFileLock ) )
+    {
         ExtAudioFileWriteAsync(self.outputFile, thisNumFrames, &outgoingAudio);
     }
     pthread_mutex_unlock( &outputAudioFileLock );
